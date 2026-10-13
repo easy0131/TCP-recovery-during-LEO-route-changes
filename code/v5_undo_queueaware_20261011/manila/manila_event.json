@@ -1,0 +1,311 @@
+{
+  "city": "manila",
+  "native_state": "/tmp/lab1-seoul-manila-queue/state",
+  "nominal_ns": 80900000000,
+  "nominal_s": 80.9,
+  "stop_s": 90.9,
+  "previous_change_s": 77.1,
+  "next_change_s": 182.8,
+  "first_check_ns": 80814000000,
+  "safe_end_ns": 80956000000,
+  "first_old_invalid_ns": null,
+  "new_valid_from_ns": 80814000000,
+  "geometry_feasible": true,
+  "grid_ns": 1000000,
+  "old_rtt_ns": 28843872,
+  "new_rtt_ns": 27453744,
+  "full_routing_sha256": "f3afc14bbbfe16c2d5ab2658ad84b54ac566a4e78650f87b94501c44fafa5db0",
+  "state_horizon_s": 200,
+  "active": [
+    {
+      "node": 881,
+      "destination": 1584,
+      "value": [
+        882,
+        2,
+        1
+      ]
+    },
+    {
+      "node": 881,
+      "destination": 1585,
+      "value": [
+        1585,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 882,
+      "destination": 1584,
+      "value": [
+        1584,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 882,
+      "destination": 1585,
+      "value": [
+        881,
+        1,
+        2
+      ]
+    },
+    {
+      "node": 1584,
+      "destination": 1585,
+      "value": [
+        882,
+        0,
+        4
+      ]
+    },
+    {
+      "node": 1585,
+      "destination": 1584,
+      "value": [
+        881,
+        0,
+        4
+      ]
+    }
+  ],
+  "retired": [
+    {
+      "node": 860,
+      "destination": 1584,
+      "value": [
+        1584,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 860,
+      "destination": 1585,
+      "value": [
+        882,
+        3,
+        0
+      ]
+    },
+    {
+      "node": 881,
+      "destination": 1584,
+      "value": [
+        882,
+        2,
+        1
+      ]
+    },
+    {
+      "node": 881,
+      "destination": 1585,
+      "value": [
+        1585,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 882,
+      "destination": 1584,
+      "value": [
+        1584,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 882,
+      "destination": 1585,
+      "value": [
+        881,
+        1,
+        2
+      ]
+    },
+    {
+      "node": 1584,
+      "destination": 1585,
+      "value": [
+        882,
+        0,
+        4
+      ]
+    },
+    {
+      "node": 1585,
+      "destination": 1584,
+      "value": [
+        881,
+        0,
+        4
+      ]
+    }
+  ],
+  "directions": [
+    {
+      "node": 1584,
+      "destination": 1585,
+      "old_path": [
+        1584,
+        860,
+        882,
+        881,
+        1585
+      ],
+      "new_path": [
+        1584,
+        882,
+        881,
+        1585
+      ],
+      "old_tail": [
+        1584,
+        860,
+        882,
+        881,
+        1585
+      ],
+      "new_tail": [
+        1584,
+        882,
+        881,
+        1585
+      ],
+      "old_queues": [
+        [
+          1584,
+          1
+        ],
+        [
+          860,
+          4
+        ],
+        [
+          882,
+          2
+        ],
+        [
+          881,
+          5
+        ]
+      ],
+      "tail_queues": [
+        [
+          1584,
+          1
+        ],
+        [
+          860,
+          4
+        ],
+        [
+          882,
+          2
+        ],
+        [
+          881,
+          5
+        ]
+      ],
+      "new_queues": [
+        [
+          1584,
+          1
+        ],
+        [
+          882,
+          2
+        ],
+        [
+          881,
+          5
+        ]
+      ],
+      "new_out": 1,
+      "keep": [],
+      "old_prop_ns": 14421936,
+      "tail_prop_ns": 14421936,
+      "new_lower_ns": 13724713,
+      "new_prop_ns": 13726872
+    },
+    {
+      "node": 882,
+      "destination": 1584,
+      "old_path": [
+        1585,
+        881,
+        882,
+        860,
+        1584
+      ],
+      "new_path": [
+        1585,
+        881,
+        882,
+        1584
+      ],
+      "old_tail": [
+        882,
+        860,
+        1584
+      ],
+      "new_tail": [
+        882,
+        1584
+      ],
+      "old_queues": [
+        [
+          1585,
+          1
+        ],
+        [
+          881,
+          3
+        ],
+        [
+          882,
+          1
+        ],
+        [
+          860,
+          5
+        ]
+      ],
+      "tail_queues": [
+        [
+          882,
+          1
+        ],
+        [
+          860,
+          5
+        ]
+      ],
+      "new_queues": [
+        [
+          1585,
+          1
+        ],
+        [
+          881,
+          3
+        ],
+        [
+          882,
+          5
+        ]
+      ],
+      "new_out": 5,
+      "keep": [],
+      "old_prop_ns": 14421936,
+      "tail_prop_ns": 4329849,
+      "new_lower_ns": 3633223,
+      "new_prop_ns": 13726872
+    }
+  ]
+}

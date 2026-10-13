@@ -1,0 +1,235 @@
+{
+  "city": "tokyo",
+  "native_state": "/tmp/lab1-seoul-tokyo-guard/state",
+  "nominal_ns": 41800000000,
+  "nominal_s": 41.8,
+  "stop_s": 51.8,
+  "previous_change_s": 33.5,
+  "next_change_s": 88.9,
+  "first_check_ns": 41753000000,
+  "safe_end_ns": 41822000000,
+  "first_old_invalid_ns": null,
+  "new_valid_from_ns": 41753000000,
+  "geometry_feasible": true,
+  "grid_ns": 1000000,
+  "old_rtt_ns": 11656654,
+  "new_rtt_ns": 11651532,
+  "full_routing_sha256": "8aec413904ba9b007dff32aef0a33c163fc3eedd48efb2505c5f3bf84f493487",
+  "state_horizon_s": 200,
+  "active": [
+    {
+      "node": 904,
+      "destination": 1584,
+      "value": [
+        1584,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 904,
+      "destination": 1585,
+      "value": [
+        1585,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 1584,
+      "destination": 1585,
+      "value": [
+        904,
+        0,
+        4
+      ]
+    },
+    {
+      "node": 1585,
+      "destination": 1584,
+      "value": [
+        904,
+        0,
+        4
+      ]
+    }
+  ],
+  "retired": [
+    {
+      "node": 883,
+      "destination": 1584,
+      "value": [
+        1584,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 883,
+      "destination": 1585,
+      "value": [
+        1585,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 904,
+      "destination": 1584,
+      "value": [
+        1584,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 904,
+      "destination": 1585,
+      "value": [
+        1585,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 1584,
+      "destination": 1585,
+      "value": [
+        904,
+        0,
+        4
+      ]
+    },
+    {
+      "node": 1585,
+      "destination": 1584,
+      "value": [
+        904,
+        0,
+        4
+      ]
+    }
+  ],
+  "directions": [
+    {
+      "node": 1584,
+      "destination": 1585,
+      "old_path": [
+        1584,
+        883,
+        1585
+      ],
+      "new_path": [
+        1584,
+        904,
+        1585
+      ],
+      "old_tail": [
+        1584,
+        883,
+        1585
+      ],
+      "new_tail": [
+        1584,
+        904,
+        1585
+      ],
+      "old_queues": [
+        [
+          1584,
+          1
+        ],
+        [
+          883,
+          5
+        ]
+      ],
+      "tail_queues": [
+        [
+          1584,
+          1
+        ],
+        [
+          883,
+          5
+        ]
+      ],
+      "new_queues": [
+        [
+          1584,
+          1
+        ],
+        [
+          904,
+          5
+        ]
+      ],
+      "new_out": 1,
+      "keep": [],
+      "old_prop_ns": 5828327,
+      "tail_prop_ns": 5828327,
+      "new_lower_ns": 5825136,
+      "new_prop_ns": 5825766
+    },
+    {
+      "node": 1585,
+      "destination": 1584,
+      "old_path": [
+        1585,
+        883,
+        1584
+      ],
+      "new_path": [
+        1585,
+        904,
+        1584
+      ],
+      "old_tail": [
+        1585,
+        883,
+        1584
+      ],
+      "new_tail": [
+        1585,
+        904,
+        1584
+      ],
+      "old_queues": [
+        [
+          1585,
+          1
+        ],
+        [
+          883,
+          5
+        ]
+      ],
+      "tail_queues": [
+        [
+          1585,
+          1
+        ],
+        [
+          883,
+          5
+        ]
+      ],
+      "new_queues": [
+        [
+          1585,
+          1
+        ],
+        [
+          904,
+          5
+        ]
+      ],
+      "new_out": 1,
+      "keep": [],
+      "old_prop_ns": 5828327,
+      "tail_prop_ns": 5828327,
+      "new_lower_ns": 5825136,
+      "new_prop_ns": 5825766
+    }
+  ]
+}

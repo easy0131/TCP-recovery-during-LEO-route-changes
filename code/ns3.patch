@@ -1,0 +1,972 @@
+diff --git a/scratch/main_satnet/handover.h b/scratch/main_satnet/handover.h
+new file mode 100644
+index 0000000..d89f49c
+--- /dev/null
++++ b/scratch/main_satnet/handover.h
+@@ -0,0 +1,285 @@
++// One rule for every route: geometry input plus live per-link rates and queues.
++#include "ns3/arbiter-single-forward.h"
++#include "ns3/ipv4-arbiter-routing.h"
++#include "ns3/data-rate.h"
++#include "ns3/ipv4-route.h"
++#include <cmath>
++#include <sstream>
++namespace adaptive {
++using namespace ns3;
++using Links=std::vector<std::pair<uint32_t,uint32_t>>;
++static constexpr uint64_t MEMORY_LIMIT=4*1024*1024;
++struct Entry { int32_t node,dst,next,out,in; };
++struct Gate {
++    uint32_t node=0,destination=0,newOut=0,wire=0,payload=0;
++    int64_t oldProp=0,tailProp=0,newLower=0,newProp=0,drain=0,gap=0,next=0,maxWait=0,burstTime=-1;
++    Links oldQueues,tailQueues,newQueues;
++    std::vector<Entry> keep;
++    bool retaining=false,seen=false;
++    SequenceNumber32 cutoff;
++    uint32_t queued=0,peak=0,drops=0;
++    uint64_t bytes=0,peakBytes=0,capacity=0,burst=0,maxBurst=0,admitted=0,released=0;
++};
++struct Event {
++    int64_t nominal=0,firstCheck=0,safeEnd=0,grid=0,oldRtt=0,newRtt=0;
++    uint32_t sender=0,receiver=0;
++    bool feasible=false;
++    std::vector<Entry> active,retired;
++    std::vector<Gate> gates;
++};
++static Event event;
++static std::string mode,arm;
++static bool protectOrder=true,pace=true,riskPacing=true,queueAware=false;
++static std::ofstream log,control;
++static int64_t start=-1,taper=1,congestedSince=-1,paceStart=-1;
++static bool failed=false;
++static double safeCap=0,initialCap=0,lastCap=-1;
++static Ptr<NetDevice> Device(uint32_t node,uint32_t iface) {
++    return NodeList::GetNode(node)->GetObject<Ipv4>()->GetNetDevice(iface);
++}
++static DataRate Rate(uint32_t node,uint32_t iface) {
++    DataRateValue value;NS_ABORT_MSG_IF(!Device(node,iface)->GetAttributeFailSafe("DataRate",value),"Missing link rate");
++    NS_ABORT_MSG_IF(!value.Get().GetBitRate(),"Zero link rate");return value.Get();
++}
++static Ptr<Queue<Packet>> QueueAt(uint32_t node,uint32_t iface) {
++    PointerValue value;auto dev=Device(node,iface);Ptr<Queue<Packet>> queue;
++    if(dev->GetAttributeFailSafe("TxQueue",value))queue=value.Get<Queue<Packet>>();
++    if(!queue && dev->GetAttributeFailSafe("Queue",value))queue=value.Get<Queue<Packet>>();
++    NS_ABORT_MSG_IF(!queue,"Missing device queue");return queue;
++}
++static int64_t Serialization(const Links& links,uint32_t bytes) {
++    int64_t ns=0;for(auto [n,i]:links)ns+=Rate(n,i).CalculateBytesTxTime(bytes).GetNanoSeconds();return ns;
++}
++static int64_t QueueDelay(const Links& links,bool excess=false,uint32_t wire=0) {
++    int64_t ns=0;
++    for(auto [n,i]:links) {
++        auto q=QueueAt(n,i);uint64_t bytes=q->GetNBytes();
++        if(excess) {
++            auto max=q->GetMaxSize();uint64_t budget=max.GetValue();
++            if(max.GetUnit()==PACKETS)budget*=wire;
++            bytes=bytes>budget/10?bytes-budget/10:0;
++        }
++        ns+=Rate(n,i).CalculateBytesTxTime(bytes).GetNanoSeconds();
++    }
++    return ns;
++}
++static uint64_t Bottleneck(const Links& links) {
++    uint64_t rate=UINT64_MAX;for(auto [n,i]:links)rate=std::min(rate,Rate(n,i).GetBitRate());
++    NS_ABORT_MSG_IF(rate==UINT64_MAX,"Empty route");return rate;
++}
++static int64_t Gap(int64_t a,int64_t b){return a>b?a-b+2*event.grid:0;}
++static uint64_t BufferNeed(uint64_t rate,int64_t gap,uint64_t burst) {
++    return uint64_t(std::ceil(double(rate)*gap/8e9))+burst;
++}
++static int64_t ReleaseTime(int64_t now,int64_t gap,int64_t next) {
++    const int64_t age=std::max<int64_t>(0,now-start);
++    return std::max(now+(age<taper?gap*(taper-age)/taper:0),next);
++}
++static void Row(const char* what,Gate& g,Ptr<Packet> packet,int64_t scheduled) {
++    TcpHeader tcp;packet->PeekHeader(tcp);
++    log<<Simulator::Now().GetNanoSeconds()<<','<<what<<','<<g.node<<','
++        <<tcp.GetSequenceNumber().GetValue()<<','<<tcp.GetAckNumber().GetValue()<<','
++        <<packet->GetSize()-tcp.GetSerializedSize()<<','<<scheduled<<','<<g.queued<<','<<g.bytes<<'\n';
++}
++static bool Hold(Gate* gate,Ptr<Ipv4L3Protocol> ip,Ptr<Ipv4Route> route,Ptr<Packet> packet,Ipv4Header header) {
++    auto& g=*gate;const int64_t now=Simulator::Now().GetNanoSeconds();
++    if(header.GetProtocol()!=6)return false;
++    auto dst=NodeList::GetNode(g.destination)->GetObject<Ipv4>()->GetAddress(1,0).GetLocal();
++    if(header.GetDestination()!=dst)return false;
++    TcpHeader tcp;packet->PeekHeader(tcp);uint32_t payload=packet->GetSize()-tcp.GetSerializedSize();
++    // These satellite devices serialize a two-byte PPP header in addition to IP/TCP.
++    uint32_t wire=packet->GetSize()+header.GetSerializedSize()+2;
++    g.wire=std::max(g.wire,wire);g.payload=std::max(g.payload,payload);
++    if(now!=g.burstTime){g.burstTime=now;g.burst=0;}g.burst+=wire;g.maxBurst=std::max(g.maxBurst,g.burst);
++    const auto key=g.destination==event.receiver?tcp.GetSequenceNumber():tcp.GetAckNumber();
++    if(start<0){if(!g.seen || key>g.cutoff){g.cutoff=key;g.seen=true;}return false;}
++    if(mode!="adaptive" || !protectOrder || !g.gap || (g.seen && key<=g.cutoff))return false;
++    if(now>=start+taper && !g.queued && now>=g.next)return false;
++    if(g.bytes+wire>g.capacity){++g.drops;Row("buffer_drop",g,packet,now);return true;}
++    const int64_t release=ReleaseTime(now,g.gap,g.next);
++    g.next=release+Rate(g.node,g.newOut).CalculateBytesTxTime(wire).GetNanoSeconds();
++    ++g.queued;++g.admitted;g.bytes+=wire;g.peak=std::max(g.peak,g.queued);g.peakBytes=std::max(g.peakBytes,g.bytes);
++    g.maxWait=std::max(g.maxWait,release-now);Row("enqueue",g,packet,release);
++    Simulator::Schedule(NanoSeconds(release-now),[gate,ip,route,packet,header,wire]() {
++        --gate->queued;++gate->released;gate->bytes-=wire;Row("release",*gate,packet,Simulator::Now().GetNanoSeconds());
++        ip->Lab1ResumeEgress(route,packet,header);
++    });return true;
++}
++static void Set(const std::vector<Entry>& rows) {
++    for(const auto& r:rows) {
++        auto routing=NodeList::GetNode(r.node)->GetObject<Ipv4>()->GetRoutingProtocol()->GetObject<Ipv4ArbiterRouting>();
++        NS_ABORT_MSG_IF(!routing,"Missing routing protocol");auto arbiter=DynamicCast<ArbiterSingleForward>(routing->GetArbiter());
++        NS_ABORT_MSG_IF(!arbiter,"Missing forwarding arbiter");arbiter->SetSingleForwardState(r.dst,r.next,r.out+1,r.in+1);
++    }
++}
++static void Apply() {
++    if(start<0 || mode!="adaptive")return;
++    Set(event.retired);Set(event.active);for(auto& g:event.gates)if(g.retaining)Set(g.keep);
++}
++static void Retire(Gate* g) {
++    NS_ABORT_MSG_IF(Simulator::Now().GetNanoSeconds()>event.safeEnd,"Retaining beyond valid geometry");
++    g->retaining=false;Apply();control<<Simulator::Now().GetNanoSeconds()<<",retire,"<<g->node<<','<<g->drain<<','<<event.safeEnd<<'\n';
++}
++static void SetPace(double bps) {
++    NS_ABORT_MSG_IF(bps<=0 || bps>safeCap+1,"Invalid pacing rate");
++    auto sockets=Config::LookupMatches("/NodeList/"+std::to_string(event.sender)+"/$ns3::TcpL4Protocol/SocketList/*");
++    NS_ABORT_MSG_IF(!sockets.GetN(),"Missing sender socket");
++    for(uint32_t i=0;i<sockets.GetN();++i) {
++        auto tcp=DynamicCast<TcpSocketBase>(sockets.Get(i));NS_ABORT_MSG_IF(!tcp,"Unexpected socket");
++        tcp->Lab1SetPacingCap(DataRate(uint64_t(bps)));tcp->SetPacingStatus(true);
++    }
++    if(std::abs(lastCap-bps)>1){control<<Simulator::Now().GetNanoSeconds()<<",pacing_bps,"<<event.sender<<','<<uint64_t(bps)<<",0\n";lastCap=bps;}
++}
++static void Measure() {
++    event.oldRtt=0;event.newRtt=0;
++    for(auto& g:event.gates) {
++        NS_ABORT_MSG_IF(!g.wire,"No packet sample before handover");
++        event.oldRtt+=g.oldProp+Serialization(g.oldQueues,g.wire);
++        event.newRtt+=g.newProp+Serialization(g.newQueues,g.wire);
++    }
++    auto& data=event.gates.at(0);NS_ABORT_MSG_IF(!data.payload,"No data packet sample");
++    double payloadRate=double(Bottleneck(data.newQueues))*data.payload/data.wire;
++    safeCap=std::max(payloadRate/2,payloadRate-double(data.payload)*8e9/event.newRtt);
++    initialCap=safeCap*std::min(1.0,double(event.newRtt)/event.oldRtt);taper=4*std::max(event.oldRtt,event.newRtt);
++    control<<Simulator::Now().GetNanoSeconds()<<",rtt_ns,0,"<<event.oldRtt<<','<<event.newRtt<<'\n';
++    control<<Simulator::Now().GetNanoSeconds()<<",capacity_bps,0,"<<Bottleneck(data.newQueues)<<','<<uint64_t(safeCap)<<'\n';
++    control<<Simulator::Now().GetNanoSeconds()<<",packet_bytes,0,"<<data.payload<<','<<data.wire<<'\n';
++    control<<Simulator::Now().GetNanoSeconds()<<",taper_ns,0,"<<taper<<",0\n";
++    if(arm=="auto_undo" || (arm=="auto_watch_undo" || arm=="guard_watch_undo")) {
++        // shortcut: full-rate single-flow pressure estimate, test delayed telemetry and sharing before deployment.
++        double oldPayload=double(Bottleneck(data.oldQueues))*data.payload/data.wire;
++        double excessBytes=std::max(0.0,oldPayload*event.oldRtt/8e9-payloadRate*event.newRtt/8e9);
++        double headroom=1e30;
++        for(auto [n,i]:data.newQueues)if(Rate(n,i).GetBitRate()==Bottleneck(data.newQueues)) {
++            auto q=QueueAt(n,i);auto maximum=q->GetMaxSize();
++            double maxBytes=maximum.GetValue()*(maximum.GetUnit()==PACKETS?data.wire:1.0);
++            headroom=std::min(headroom,std::max(0.0,maxBytes-q->GetNBytes())*data.payload/data.wire);
++        }
++        NS_ABORT_MSG_IF(headroom==1e30,"Missing bottleneck headroom");
++        riskPacing=excessBytes>headroom;pace=riskPacing || (arm=="auto_watch_undo" || arm=="guard_watch_undo");
++        control<<Simulator::Now().GetNanoSeconds()<<",risk_bytes,0,"<<uint64_t(excessBytes)<<','<<uint64_t(headroom)<<'\n';
++        control<<Simulator::Now().GetNanoSeconds()<<",risk_pacing,0,"<<riskPacing<<",0\n";
++    }
++}
++static int64_t OrderQueueExcess(int64_t queuedNs,int64_t rttNs) {
++    return std::max<int64_t>(0,queuedNs-rttNs/10);
++}
++static void Feedback() {
++    if(!pace)return;
++    const int64_t now=Simulator::Now().GetNanoSeconds();auto& data=event.gates.at(0);
++    int64_t excess=QueueDelay(data.newQueues,true,data.wire);
++    if(queueAware) {
++        // The order buffer is also backlog; allow 10% of the measured path RTT.
++        // shortcut: serialized backlog uses the existing single-flow egress-rate estimate.
++        int64_t queued=Rate(data.node,data.newOut).CalculateBytesTxTime(data.bytes).GetNanoSeconds();
++        int64_t hidden=OrderQueueExcess(queued,event.newRtt);
++        if(hidden>0)control<<now<<",order_queue_excess,"<<event.sender<<','<<hidden<<','<<queued<<'\n';
++        excess+=hidden;
++    }
++    if(paceStart<0) {
++        if(excess>0) {
++            if(congestedSince<0)congestedSince=now;
++            if(now-congestedSince>=event.newRtt) {
++                paceStart=now;initialCap=safeCap;control<<now<<",pacing_trigger,"<<event.sender<<','<<excess<<','<<now-congestedSince<<'\n';
++            }
++        } else congestedSince=-1;
++    }
++    if(paceStart>=0) {
++        double progress=std::min(1.0,double(now-paceStart)/(4*event.newRtt));
++        double ramp=initialCap+(safeCap-initialCap)*progress;
++        SetPace(std::min(ramp,safeCap*event.newRtt/(event.newRtt+excess)));
++    }
++    Simulator::Schedule(NanoSeconds(paceStart<0?std::max(event.grid,event.newRtt/20):event.newRtt),&Feedback);
++}
++static void PaceOnly() {Measure();paceStart=Simulator::Now().GetNanoSeconds();Feedback();}
++static bool Due(int64_t now,int64_t need){return now>=event.nominal || event.safeEnd-now<=need+event.grid;}
++static void Poll() {
++    const int64_t now=Simulator::Now().GetNanoSeconds();int64_t need=0;
++    for(auto& g:event.gates){g.drain=g.oldProp+Serialization(g.oldQueues,g.wire)+QueueDelay(g.oldQueues)+2*event.grid;need=std::max(need,g.drain);}
++    if(!Due(now,need)){Simulator::Schedule(NanoSeconds(std::min(event.grid,event.nominal+3-now)),&Poll);return;}
++    if(!event.feasible || now+need>event.safeEnd){failed=true;control<<now<<",no_safe_overlap,0,"<<need<<','<<event.safeEnd<<'\n';PaceOnly();return;}
++    Measure();
++    for(auto& g:event.gates) {
++        g.gap=Gap(g.tailProp+Serialization(g.tailQueues,g.wire)+QueueDelay(g.tailQueues),g.newLower);
++        g.capacity=BufferNeed(Rate(g.node,g.newOut).GetBitRate(),g.gap,std::max(uint64_t(g.wire),g.maxBurst));
++        if(g.capacity>MEMORY_LIMIT){failed=true;control<<now<<",memory_fallback,"<<g.node<<','<<g.capacity<<','<<MEMORY_LIMIT<<'\n';PaceOnly();return;}
++    }
++    start=now;control<<now<<",activate,0,"<<event.nominal<<','<<event.safeEnd<<'\n';
++    for(auto& g:event.gates) {
++        g.retaining=!g.keep.empty();control<<now<<",buffer_bytes,"<<g.node<<','<<g.capacity<<','<<MEMORY_LIMIT<<'\n';
++        control<<now<<",direction,"<<g.node<<','<<g.drain<<','<<g.gap<<'\n';
++        if(g.retaining)Simulator::Schedule(NanoSeconds(g.drain),&Retire,&g);
++    }
++    Apply();
++    if((event.newRtt<event.oldRtt || Bottleneck(event.gates[0].newQueues)<Bottleneck(event.gates[0].oldQueues)) && ((arm!="auto_watch_undo" && arm!="guard_watch_undo") || riskPacing))paceStart=now;
++    else control<<now<<",watch_queue,"<<event.sender<<",0,"<<event.newRtt<<'\n';
++    Feedback();
++}
++static void Defaults() {
++    const char* value=std::getenv("HYBRID_ARM");NS_ABORT_MSG_IF(!value,"Missing hybrid arm");arm=value;queueAware=arm=="queue_guard_undo";if(queueAware)arm="guard_watch_undo";
++    NS_ABORT_MSG_IF(arm!="baseline" && arm!="v5" && arm!="undo" && arm!="drain_undo" &&
++        arm!="drain_pace_undo" && arm!="full_undo" && arm!="undo_full" && arm!="auto_undo" && arm!="drain_pace" && (arm!="auto_watch_undo" && arm!="guard_watch_undo"),"Invalid hybrid arm");
++    protectOrder=arm=="v5" || arm=="full_undo" || arm=="guard_watch_undo";
++    pace=arm!="drain_undo";
++    const char* v=std::getenv("ADAPT_MODE");mode=v?v:"baseline";
++    NS_ABORT_MSG_IF(mode!="baseline" && mode!="pace" && mode!="adaptive","Invalid mode");
++    const char* path=std::getenv("ADAPT_EVENT_FILE");NS_ABORT_MSG_IF(!path,"Missing forecast input");
++    std::ifstream input(path);NS_ABORT_MSG_IF(!input,"Cannot read forecast input");std::string line,tag;bool first=true;
++    while(std::getline(input,line)) {
++        std::istringstream s(line);s>>tag;
++        if(first){NS_ABORT_MSG_IF(tag!="event","Missing event header");s>>event.nominal>>event.firstCheck>>event.safeEnd>>event.grid>>event.feasible>>event.sender>>event.receiver;first=false;}
++        else if(tag=="active" || tag=="retired"){Entry r;s>>r.node>>r.dst>>r.next>>r.out>>r.in;(tag=="active"?event.active:event.retired).push_back(r);}
++        else {
++            size_t k;s>>k;
++            if(tag=="gate") {
++                NS_ABORT_MSG_IF(k!=event.gates.size(),"Invalid gate order");Gate g;
++                s>>g.node>>g.destination>>g.oldProp>>g.tailProp>>g.newLower>>g.newProp>>g.newOut;event.gates.push_back(g);
++            } else {
++                NS_ABORT_MSG_IF(k>=event.gates.size(),"Invalid gate index");auto& g=event.gates[k];
++                if(tag=="keep"){Entry r;s>>r.node>>r.dst>>r.next>>r.out>>r.in;g.keep.push_back(r);}
++                else {uint32_t n,i;s>>n>>i;NS_ABORT_MSG_IF(tag!="oldq" && tag!="tailq" && tag!="newq","Invalid forecast tag");(tag=="oldq"?g.oldQueues:tag=="tailq"?g.tailQueues:g.newQueues).emplace_back(n,i);}
++            }
++        }
++        NS_ABORT_MSG_IF(s.fail(),"Invalid forecast row: "<<line);std::string extra;NS_ABORT_MSG_IF(s>>extra,"Extra forecast input");
++    }
++    NS_ABORT_MSG_IF(first || event.gates.size()!=2 || event.grid<=0 || event.firstCheck<=0 || event.firstCheck>event.nominal,"Invalid event");
++}
++static void Install(const std::string& runDir) {
++    NS_ABORT_MSG_IF(Gap(100,100)!=0 || Gap(101,100)!=2*event.grid+1,"Selective gap check");
++    NS_ABORT_MSG_IF(BufferNeed(100000000,10000000,1434)!=126434 || BufferNeed(200000000,10000000,1434)!=251434,"Rate-scaled byte budget check");
++    std::cout << "HYBRID_ARM name=" << (queueAware?"queue_guard_undo":arm) << " guard=" << protectOrder << " pace=" << pace << std::endl;
++    NS_ABORT_MSG_IF(OrderQueueExcess(50,1000)!=0 || OrderQueueExcess(100,1000)!=0 ||
++        OrderQueueExcess(150,1000)!=50,"Order queue delay budget check");
++    start=100;taper=1000;NS_ABORT_MSG_IF(ReleaseTime(100,1000,0)!=1100 || ReleaseTime(1100,1000,1600)!=1600,"FIFO check");start=-1;
++    log.open(runDir+"/handover.csv");control.open(runDir+"/controller.csv");NS_ABORT_MSG_IF(!log || !control,"Cannot open output");
++    log<<"time_ns,event,node,seq,ack,payload_bytes,scheduled_ns,buffer_packets,buffer_bytes\n";
++    control<<"time_ns,event,node,value_a,value_b\n";
++    for(auto& g:event.gates){auto ip=NodeList::GetNode(g.node)->GetObject<Ipv4L3Protocol>();ip->SetLab1EgressFilter(MakeBoundCallback(&Hold,&g,ip));}
++    if(arm!="baseline" && arm!="v5" && arm!="drain_pace")Simulator::Schedule(NanoSeconds(event.nominal),[]() {
++        auto sockets=Config::LookupMatches("/NodeList/"+std::to_string(event.sender)+"/$ns3::TcpL4Protocol/SocketList/*");
++        uint32_t armed=0;
++        for(uint32_t i=0;i<sockets.GetN();++i) {
++            auto tcp=DynamicCast<TcpSocketBase>(sockets.Get(i));Address peer;
++            if(tcp && tcp->GetPeerName(peer)==0 && InetSocketAddress::IsMatchingType(peer) &&
++                InetSocketAddress::ConvertFrom(peer).GetPort()==1024){tcp->ArmTimestampUndo();++armed;}
++        }
++        NS_ABORT_MSG_IF(armed!=1,"Single-flow experiment requires one connected sender");
++    });
++    if(mode=="pace")Simulator::Schedule(NanoSeconds(event.nominal+3),&PaceOnly);
++    else if(mode=="adaptive") {
++        Simulator::Schedule(NanoSeconds(event.firstCheck+3),&Poll);
++        for(int64_t tick=(event.firstCheck/100000000LL+1)*100000000LL;tick<=event.safeEnd;tick+=100000000LL)Simulator::Schedule(NanoSeconds(tick+2),&Apply);
++    }
++}
++static void Finish() {
++    for(auto& g:event.gates) {
++        NS_ABORT_MSG_IF(g.queued || g.bytes || g.admitted!=g.released || g.retaining,"Unfinished handover");
++        control<<Simulator::Now().GetNanoSeconds()<<",gate_peak,"<<g.node<<','<<g.peak<<','<<g.peakBytes<<'\n';
++        control<<Simulator::Now().GetNanoSeconds()<<",gate_totals,"<<g.node<<','<<g.admitted<<','<<g.drops<<'\n';
++        control<<Simulator::Now().GetNanoSeconds()<<",gate_max_wait,"<<g.node<<','<<g.maxWait<<",0\n";
++    }
++    NS_ABORT_MSG_IF(mode=="adaptive" && start<0 && !failed,"Missing controller decision");
++    control<<Simulator::Now().GetNanoSeconds()<<",finish,0,"<<start<<','<<failed<<'\n';
++    log.flush();control.flush();NS_ABORT_MSG_IF(!log || !control,"Controller write error");log.close();control.close();
++}
++}
+diff --git a/scratch/main_satnet/lab1_packet_hops.h b/scratch/main_satnet/lab1_packet_hops.h
+new file mode 100644
+index 0000000..d6a1ce1
+--- /dev/null
++++ b/scratch/main_satnet/lab1_packet_hops.h
+@@ -0,0 +1,180 @@
++#ifndef LAB1_PACKET_HOPS_H
++#define LAB1_PACKET_HOPS_H
++// Passive diagnostic hooks only. Does not alter packet contents, queues or TCP.
++#include <cstdint>
++#include <cstdlib>
++#include <fstream>
++#include <string>
++#include <vector>
++#include <algorithm>
++#include <stdexcept>
++#include "ns3/node-list.h"
++#include "ns3/node.h"
++#include "ns3/net-device.h"
++#include "ns3/packet.h"
++#include "ns3/ipv4-header.h"
++#include "ns3/ipv4-l3-protocol.h"
++#include "ns3/traffic-control-layer.h"
++#include "ns3/queue.h"
++#include "ns3/pointer.h"
++#include "ns3/simulator.h"
++
++namespace lab1hops {
++using namespace ns3;
++struct Header { uint32_t seq=0, bytes=0, ipid=0, ttl=0; bool tcp=false, target=false; };
++static uint32_t Read32(const uint8_t* p) {
++    return (uint32_t(p[0])<<24)|(uint32_t(p[1])<<16)|(uint32_t(p[2])<<8)|p[3];
++}
++static Header Decode(const uint8_t* b, uint32_t n) {
++    Header h;
++    uint32_t o=0;
++    if (n>=2 && b[0]==0 && b[1]==0x21) o=2; // PPP IPv4 framing used by both devices
++    if (n<o+20 || (b[o]>>4)!=4) return h;
++    uint32_t ih=(b[o]&15)*4;
++    if (ih<20 || n<o+ih+20 || b[o+9]!=6) return h;
++    uint32_t total=(uint32_t(b[o+2])<<8)|b[o+3];
++    uint32_t th=(b[o+ih+12]>>4)*4;
++    if (th<20 || total<ih+th) return h;
++    // Initial experiment uses unfragmented TCP. Reject later fragments.
++    if (((uint32_t(b[o+6])<<8)|b[o+7]) & 0x1fff) return h;
++    h.tcp=true; h.seq=Read32(b+o+ih+4); h.bytes=total-ih-th;
++    h.ipid=(uint32_t(b[o+4])<<8)|b[o+5]; h.ttl=b[o+8];
++    bool flow=Read32(b+o+12)==0x0a129001 && Read32(b+o+16)==0x0a129101;
++    bool selected=h.seq==661021 || h.seq==662401 || h.seq==665161 ||
++                  h.seq==666541 || h.seq==667921;
++    h.target=flow && h.bytes>0 && selected;
++    return h;
++}
++struct QueueRef { uint32_t node, device; Ptr<NetDevice> dev; Ptr<Queue<Packet>> queue; };
++static std::vector<QueueRef> queues;
++static std::ofstream events, drops, coverage, audit;
++static uint64_t eventRows=0, dropRows=0, queueDropCallbacks=0;
++static bool enabled=false;
++static Ptr<Queue<Packet>> DeviceQueue(Ptr<NetDevice> dev) {
++    PointerValue v;
++    Ptr<Queue<Packet>> q;
++    if (dev->GetAttributeFailSafe("TxQueue",v)) q=v.Get<Queue<Packet>>();
++    if (!q && dev->GetAttributeFailSafe("Queue",v)) q=v.Get<Queue<Packet>>();
++    return q;
++}
++static void Record(std::string event, uint32_t node, uint32_t device,
++                   Queue<Packet>* q, Ptr<const Packet> p, bool drop) {
++    uint8_t b[128];
++    uint32_t n=p->CopyData(b,std::min<uint32_t>(p->GetSize(),128));
++    Header h=Decode(b,n);
++    if (!drop && !h.target) return;
++    const char* digits="0123456789abcdef";
++    std::string hex;
++    for (uint32_t i=0;i<n;++i) { hex+=digits[b[i]>>4]; hex+=digits[b[i]&15]; }
++    auto write=[&](std::ostream& out) {
++        out << Simulator::Now().GetNanoSeconds() << ',' << event << ',' << node << ','
++            << device << ',' << p->GetUid() << ',' << p->GetSize() << ','
++            << h.tcp << ',' << h.ipid << ',' << h.seq << ',' << h.bytes << ',' << h.ttl << ',';
++        if (q) out << q->GetNPackets() << ',' << q->GetNBytes() << ',' << q->GetMaxSize();
++        else out << "NA,NA,NA";
++        out << ',' << hex << '\n';
++    };
++    if (h.target) { write(events); ++eventRows; }
++    if (drop) { write(drops); ++dropRows; }
++}
++static void Ip(std::string event,uint32_t node,Ptr<const Packet> p,Ptr<Ipv4>,uint32_t iface) {
++    Record(event,node,iface,nullptr,p,false);
++}
++static void IpDrop(uint32_t node,const Ipv4Header& header,Ptr<const Packet> p,
++                   Ipv4L3Protocol::DropReason reason,Ptr<Ipv4>,uint32_t iface) {
++    auto copy=p->Copy(); copy->AddHeader(header);
++    Record("ip_drop_reason_"+std::to_string(int(reason)),node,iface,nullptr,copy,true);
++}
++static void QueueEvent(std::string event,uint32_t node,uint32_t device,
++                       Queue<Packet>* q,Ptr<const Packet> p) {
++    bool drop=event=="queue_drop_before" || event=="queue_drop_after";
++    if (drop) ++queueDropCallbacks;
++    Record(event,node,device,q,p,drop);
++}
++static void DeviceEvent(std::string event,uint32_t node,uint32_t device,Ptr<const Packet> p) {
++    bool drop=event=="MacTxDrop" || event=="PhyTxDrop" || event=="PhyRxDrop";
++    Record(event,node,device,nullptr,p,drop);
++}
++static void TcDrop(uint32_t node, Ptr<const Packet> p) {
++    Record("TcDrop", node, uint32_t(-1), nullptr, p, true);
++}
++static void Install(const std::string& dir) {
++    const char* flag=std::getenv("LAB1_HOPS");
++    if (!flag || std::string(flag)!="1") return;
++    enabled=true;
++    events.open(dir+"/hop_events.csv"); drops.open(dir+"/hop_drops.csv");
++    coverage.open(dir+"/hop_coverage.txt"); audit.open(dir+"/hop_queue_audit.csv");
++    if (!events || !drops || !coverage || !audit) throw std::runtime_error("LAB1_HOPS: cannot open logs");
++    const std::string header="time_ns,event,node,interface_or_device,uid,packet_bytes,tcp_decoded,ip_id,seq,payload_bytes,ttl,queue_packets,queue_bytes,queue_max,hex_prefix\n";
++    events<<header; drops<<header;
++    audit<<"node,device,role,same_queue,received_packets,dropped_packets,remaining_packets,queue_max\n";
++    coverage<<"version=1\ntarget_sequences=661021 662401 665161 666541 667921\n"
++            <<"flow_ipv4=10.18.144.1->10.18.145.1\n"
++            <<"all_drop_callbacks_logged; multiple_hooks_can_report_same_loss\n"
++            <<"IP events use IPv4 interface index; other events use device index\n";
++    uint32_t ips=0, devices=0, missing=0;
++    for (auto it=NodeList::Begin();it!=NodeList::End();++it) {
++        auto node=*it; auto id=node->GetId(); auto ip=node->GetObject<Ipv4L3Protocol>();
++        auto tc=node->GetObject<TrafficControlLayer>();
++        bool tcOk=tc && tc->TraceConnectWithoutContext(
++            "TcDrop",MakeBoundCallback(&TcDrop,id));
++        if (!tcOk) {
++            ++missing;
++            coverage<<"missing_tc_hook="<<id<<'\n';
++        }
++        if (ip) {
++            bool tx=ip->TraceConnectWithoutContext("Tx",MakeBoundCallback(&Ip,std::string("ip_tx"),id));
++            bool rx=ip->TraceConnectWithoutContext("Rx",MakeBoundCallback(&Ip,std::string("ip_rx"),id));
++            bool dr=ip->TraceConnectWithoutContext("Drop",MakeBoundCallback(&IpDrop,id));
++            if (tx && rx && dr) ++ips; else { ++missing; coverage<<"missing_ip="<<id<<'\n'; }
++        }
++        for (uint32_t j=0;j<node->GetNDevices();++j) {
++            auto dev=node->GetDevice(j);
++            if (dev->GetInstanceTypeId().GetName()=="ns3::LoopbackNetDevice") continue;
++            ++devices;
++            auto q=DeviceQueue(dev);
++            if (!q) { ++missing; coverage<<"missing_queue="<<id<<'/'<<j<<'\n'; }
++            else {
++                queues.push_back({id,j,dev,q});
++                const char* names[]={"Enqueue","Dequeue","DropBeforeEnqueue","DropAfterDequeue"};
++                const char* labels[]={"queue_enqueue","queue_dequeue","queue_drop_before","queue_drop_after"};
++                for (uint32_t k=0;k<4;++k) {
++                    if (!q->TraceConnectWithoutContext(names[k],MakeBoundCallback(&QueueEvent,std::string(labels[k]),id,j,PeekPointer(q)))) {
++                        ++missing; coverage<<"missing_queue_hook="<<id<<'/'<<j<<':'<<names[k]<<'\n';
++                    }
++                }
++            }
++            for (const char* name : {"MacTx","MacTxDrop","MacRx","PhyTxBegin","PhyTxEnd","PhyTxDrop","PhyRxEnd","PhyRxDrop"}) {
++                if (!dev->TraceConnectWithoutContext(name,MakeBoundCallback(&DeviceEvent,std::string(name),id,j))) {
++                    ++missing; coverage<<"missing_device_hook="<<id<<'/'<<j<<':'<<name<<'\n';
++                }
++            }
++        }
++    }
++    coverage<<"connected_ip_nodes="<<ips<<" connected_devices="<<devices<<" connected_queues="<<queues.size()<<" missing_required="<<missing<<std::endl;
++    if (missing || ips!=NodeList::GetNNodes() || queues.empty()) throw std::runtime_error("LAB1_HOPS: incomplete trace coverage");
++}
++static void Finish() {
++    if (!enabled) return;
++    uint64_t received=0, dropped=0; uint32_t changed=0;
++    auto row=[&](const QueueRef& r,Ptr<Queue<Packet>> q,const char* role,bool same) {
++        audit<<r.node<<','<<r.device<<','<<role<<','<<same<<','<<q->GetTotalReceivedPackets()<<','
++             <<q->GetTotalDroppedPackets()<<','<<q->GetNPackets()<<','<<q->GetMaxSize()<<'\n';
++    };
++    for (const auto& r:queues) {
++        auto current=DeviceQueue(r.dev); bool same=current==r.queue;
++        if (!same) ++changed;
++        received+=r.queue->GetTotalReceivedPackets(); dropped+=r.queue->GetTotalDroppedPackets();
++        if (!same || r.queue->GetTotalReceivedPackets() || r.queue->GetTotalDroppedPackets()) row(r,r.queue,"attached",same);
++        if (!same && current) row(r,current,"current",false);
++    }
++    coverage<<"target_event_rows="<<eventRows<<" drop_hook_rows="<<dropRows<<'\n'
++            <<"attached_queue_received="<<received<<" attached_queue_dropped="<<dropped
++            <<" queue_drop_callbacks="<<queueDropCallbacks<<" changed_queue_objects="<<changed<<'\n'
++            <<"completed=1\n";
++    events.flush(); drops.flush(); audit.flush(); coverage.flush();
++    if (!events || !drops || !audit || !coverage) throw std::runtime_error("LAB1_HOPS: output write failure");
++    events.close(); drops.close(); audit.close(); coverage.close(); queues.clear();
++}
++} // namespace lab1hops
++#endif
+diff --git a/scratch/main_satnet/main_satnet.cc b/scratch/main_satnet/main_satnet.cc
+index 774f5c1..d6a5d40 100644
+--- a/scratch/main_satnet/main_satnet.cc
++++ b/scratch/main_satnet/main_satnet.cc
+@@ -39,6 +39,183 @@
+ #include "ns3/arbiter-single-forward-helper.h"
+ #include "ns3/ipv4-arbiter-routing-helper.h"
+ #include "ns3/gsl-if-bandwidth-helper.h"
++#include "lab1_packet_hops.h"
++
++// LAB1_DIAGNOSTICS: passive tracing, enabled only by LAB1_DIAG=1.
++#include <algorithm>
++#include <cstdlib>
++#include "ns3/config.h"
++#include "ns3/simulator.h"
++#include "ns3/node.h"
++#include "ns3/packet.h"
++#include "ns3/ipv4-header.h"
++#include "ns3/node-list.h"
++#include "ns3/net-device.h"
++#include "ns3/pointer.h"
++#include "ns3/queue.h"
++#include "ns3/ipv4-l3-protocol.h"
++#include "ns3/tcp-socket-state.h"
++#include "ns3/tcp-socket-base.h"
++
++namespace lab1diag {
++using namespace ns3;
++static std::ofstream packets, states, coverage, rtts, retxs;
++static uint64_t packetRows = 0, dropRows = 0;
++static bool InWindow() {
++    const auto ns = Simulator::Now().GetNanoSeconds();
++    static const int64_t nominal=std::stoll(std::getenv("ADAPT_NOMINAL_NS"));
++    return ns <= 5000000000LL || (ns >= nominal-2200000000LL && ns <= nominal+6000000000LL);
++}
++static void Record(const std::string& event, uint32_t node, uint32_t iface,
++                   Ptr<const Packet> p, const std::string& detail) {
++    uint8_t bytes[128];
++    uint32_t n = p->CopyData(bytes, std::min<uint32_t>(p->GetSize(), sizeof(bytes)));
++    static const char hex[] = "0123456789abcdef";
++    std::string prefix;
++    prefix.reserve(2 * n);
++    for (uint32_t i = 0; i < n; ++i) {
++        prefix += hex[bytes[i] >> 4];
++        prefix += hex[bytes[i] & 15];
++    }
++    packets << Simulator::Now().GetNanoSeconds() << ',' << event << ','
++            << node << ',' << iface << ',' << p->GetUid() << ','
++            << p->GetSize() << ',' << detail << ',' << prefix << '\n';
++    ++packetRows;
++}
++static void IpPacket(std::string event, uint32_t node, Ptr<const Packet> p,
++                     Ptr<Ipv4> ipv4, uint32_t iface) {
++    (void)ipv4;
++    if (InWindow()) Record(event, node, iface, p, "ipv4");
++}
++static void QueueDrop(std::string event, uint32_t node, uint32_t device,
++                      Queue<Packet>* queue, Ptr<const Packet> p) {
++    ++dropRows;
++    Record(event, node, device, p,
++           "queue_packets=" + std::to_string(queue->GetNPackets()) +
++           ";queue_bytes=" + std::to_string(queue->GetNBytes()));
++}
++static void IpDrop(uint32_t node, const Ipv4Header& header, Ptr<const Packet> p,
++                   Ipv4L3Protocol::DropReason reason, Ptr<Ipv4> ipv4, uint32_t iface) {
++    (void)ipv4;
++    Ptr<Packet> copy = p->Copy();
++    copy->AddHeader(header);
++    ++dropRows;
++    Record("ip_drop", node, iface, copy, "reason=" + std::to_string(int(reason)));
++}
++static void MacDrop(uint32_t node, uint32_t device, Ptr<const Packet> p) {
++    ++dropRows;
++    Record("mac_tx_drop", node, device, p, "may_duplicate_queue_drop");
++}
++static void Congestion(uint32_t node, uint32_t socketIndex, TcpSocketState::TcpCongState_t oldState,
++                       TcpSocketState::TcpCongState_t newState) {
++    states << Simulator::Now().GetNanoSeconds() << ',' << node << ',' << socketIndex << ','
++           << int(oldState) << ',' << int(newState) << '\n';
++}
++static void RttSample(uint32_t node, uint32_t socketIndex, Time, Time value) {
++    rtts << Simulator::Now().GetNanoSeconds() << ',' << node << ',' << socketIndex
++         << ',' << value.GetNanoSeconds() << '\n';
++}
++static void Retransmission(uint32_t node, uint32_t socketIndex, Ptr<const Packet> p,
++        const TcpHeader& header, const Address&, const Address&, Ptr<const TcpSocketBase>) {
++    retxs << Simulator::Now().GetNanoSeconds() << ',' << node << ',' << socketIndex
++          << ',' << header.GetSequenceNumber().GetValue() << ',' << p->GetSize() << '\n';
++}
++static void AttachSocket() {
++    // Single flow starts at t=0. Its sender socket exists by t=0.001 s for this t=0 single-flow experiment.
++    auto matches = Config::LookupMatches("/NodeList/1584/$ns3::TcpL4Protocol/SocketList/*");
++    coverage << "sender_socket_matches=" << matches.GetN() << std::endl;
++    uint32_t count = 0, rttCount = 0, retxCount = 0;
++    for (uint32_t i = 0; i < matches.GetN(); ++i) {
++        if (matches.Get(i)->TraceConnectWithoutContext(
++                "CongState", MakeBoundCallback(&Congestion, uint32_t(1584), i))) ++count;
++        if (matches.Get(i)->TraceConnectWithoutContext(
++                "LastRTT", MakeBoundCallback(&RttSample, uint32_t(1584), i))) ++rttCount;
++        if (matches.Get(i)->TraceConnectWithoutContext(
++                "Retransmission", MakeBoundCallback(&Retransmission, uint32_t(1584), i))) ++retxCount;
++    }
++    coverage << "sender_congestion_state_connections=" << count << std::endl;
++    coverage << "last_rtt_connections=" << rttCount << std::endl;
++    if (rttCount == 0) throw std::runtime_error("No LastRTT connection");
++    coverage << "retransmission_connections=" << retxCount << std::endl;
++    if (retxCount == 0) throw std::runtime_error("No Retransmission connection");
++    if (count == 0) throw std::runtime_error("LAB1_DIAG: no sender-node CongState connection");
++}
++static void Install(const std::string& runDir) {
++    const std::string base = runDir + "/";
++    packets.open(base + "diagnostic_packets.csv");
++    states.open(base + "diagnostic_states.csv");
++    coverage.open(base + "diagnostic_coverage.txt");
++    rtts.open(base + "diagnostic_last_rtt.csv");
++    if (!rtts) throw std::runtime_error("Cannot open LastRTT output");
++    rtts << "time_ns,node,socket_index,rtt_ns\n";
++    retxs.open(base + "diagnostic_retransmissions.csv");
++    if (!retxs) throw std::runtime_error("Cannot open retransmission output");
++    retxs << "time_ns,node,socket_index,seq,payload_bytes\n";
++    if (!packets || !states || !coverage) throw std::runtime_error("LAB1_DIAG: cannot open output files");
++    packets << "time_ns,event,node,interface_or_device,uid,packet_bytes,detail,hex_prefix\n";
++    states << "time_ns,node,socket_index,old_state,new_state\n";
++    coverage << "packet_window_seconds=0..5 and ADAPT_NOMINAL_NS/1e9-1 .. ADAPT_NOMINAL_NS/1e9+3.5\n"
++             << "drop_window=entire_run\n"
++             << "state_codes=0:OPEN 1:DISORDER 2:CWR 3:RECOVERY 4:LOSS\n"
++             << "ip_events_have_ipv4_header; queue_events_have_device_framing\n"
++             << "uid_alone_does_not_identify_original_vs_retransmission\n";
++    uint32_t queues = 0, missing = 0, endpoints = 0, ipDrops = 0;
++    for (auto it = NodeList::Begin(); it != NodeList::End(); ++it) {
++        Ptr<Node> node = *it;
++        const uint32_t id = node->GetId();
++        Ptr<Ipv4L3Protocol> ip = node->GetObject<Ipv4L3Protocol>();
++        if (ip) {
++            if (ip->TraceConnectWithoutContext("Drop", MakeBoundCallback(&IpDrop, id))) ++ipDrops;
++            else ++missing;
++            if (id == 1584 || id == 1585) {
++                bool tx = ip->TraceConnectWithoutContext("Tx", MakeBoundCallback(&IpPacket, std::string("ip_tx"), id));
++                bool rx = ip->TraceConnectWithoutContext("Rx", MakeBoundCallback(&IpPacket, std::string("ip_rx"), id));
++                if (tx && rx) ++endpoints; else ++missing;
++                coverage << "endpoint=" << id << " tx=" << tx << " rx=" << rx << '\n';
++            }
++        }
++        for (uint32_t j = 0; j < node->GetNDevices(); ++j) {
++            Ptr<NetDevice> dev = node->GetDevice(j);
++            const std::string type = dev->GetInstanceTypeId().GetName();
++            if (type == "ns3::LoopbackNetDevice") continue;
++            PointerValue value;
++            Ptr<Queue<Packet>> queue;
++            if (dev->GetAttributeFailSafe("TxQueue", value)) queue = value.Get<Queue<Packet>>();
++            if (!queue && dev->GetAttributeFailSafe("Queue", value)) queue = value.Get<Queue<Packet>>();
++            bool before = false, after = false;
++            if (queue) {
++                before = queue->TraceConnectWithoutContext("DropBeforeEnqueue",
++                    MakeBoundCallback(&QueueDrop, std::string("queue_drop_before"), id, j, PeekPointer(queue)));
++                after = queue->TraceConnectWithoutContext("DropAfterDequeue",
++                    MakeBoundCallback(&QueueDrop, std::string("queue_drop_after"), id, j, PeekPointer(queue)));
++            }
++            bool mac = dev->TraceConnectWithoutContext("MacTxDrop", MakeBoundCallback(&MacDrop, id, j));
++            coverage << "device=" << id << '/' << j << " type=" << type
++                     << " queue=" << (queue ? queue->GetInstanceTypeId().GetName() : "MISSING")
++                     << " before=" << before << " after=" << after << " mac_tx_drop=" << mac << '\n';
++            if (before && after) ++queues; else ++missing;
++        }
++    }
++    coverage << "connected_queues=" << queues << " missing_required=" << missing
++             << " endpoints=" << endpoints << " ip_drop_connections=" << ipDrops << std::endl;
++    if (missing || !queues || endpoints != 2) {
++        throw std::runtime_error("LAB1_DIAG: incomplete trace coverage; inspect diagnostic_coverage.txt");
++    }
++    Simulator::Schedule(Seconds(0.001), &AttachSocket);
++    std::cout << "LAB1_DIAG: queues=" << queues << "; endpoint packets at 0..5 and ADAPT_NOMINAL_NS/1e9-1 .. ADAPT_NOMINAL_NS/1e9+3.5 s; configured drop hooks logged\n";
++}
++static void Finish() {
++    if (!coverage.is_open()) return;
++    coverage << "packet_rows=" << packetRows << " drop_event_rows=" << dropRows
++             << "\ncompleted=1\n";
++    packets.flush(); states.flush(); coverage.flush(); rtts.flush(); retxs.flush();
++    if (!packets || !states || !coverage || !rtts || !retxs) throw std::runtime_error("LAB1_DIAG: output write failure");
++    packets.close(); states.close(); coverage.close(); rtts.close(); retxs.close();
++}
++} // namespace lab1diag
++// END LAB1_DIAGNOSTICS
++
++#include "handover.h"
+ 
+ using namespace ns3;
+ 
+@@ -74,6 +251,8 @@ int main(int argc, char *argv[]) {
+         printf("  > Pacing..................... enabled\n");
+     }
+ 
++    adaptive::Defaults();
++
+     // Read topology, and install routing arbiters
+     Ptr<TopologySatelliteNetwork> topology = CreateObject<TopologySatelliteNetwork>(basicSimulation, Ipv4ArbiterRoutingHelper());
+     ArbiterSingleForwardHelper arbiterHelper(basicSimulation, topology->GetNodes());
+@@ -88,8 +267,18 @@ int main(int argc, char *argv[]) {
+     // Schedule pings
+     PingmeshScheduler pingmeshScheduler(basicSimulation, topology); // Requires enable_pingmesh_scheduler=true
+ 
++    // Enable passive diagnostics only for the requested run.
++    const char* diag = std::getenv("LAB1_DIAG");
++    if (diag && std::string(diag) == "1") lab1diag::Install(run_dir);
++
++    lab1hops::Install(run_dir);
++    adaptive::Install(run_dir);
++
+     // Run simulation
+     basicSimulation->Run();
++    lab1hops::Finish();
++    lab1diag::Finish();
++    adaptive::Finish();
+ 
+     // Write flow results
+     tcpFlowScheduler.WriteResults();
+diff --git a/src/internet/model/ipv4-l3-protocol.cc b/src/internet/model/ipv4-l3-protocol.cc
+index 90179b6..cc896d8 100644
+--- a/src/internet/model/ipv4-l3-protocol.cc
++++ b/src/internet/model/ipv4-l3-protocol.cc
+@@ -924,6 +924,13 @@ Ipv4L3Protocol::BuildHeader(Ipv4Address source,
+ 
+ void
+ Ipv4L3Protocol::SendRealOut(Ptr<Ipv4Route> route, Ptr<Packet> packet, const Ipv4Header& ipHeader)
++{
++    if (!m_lab1EgressFilter.IsNull() && m_lab1EgressFilter(route,packet,ipHeader)) return;
++    Lab1ResumeEgress(route,packet,ipHeader);
++}
++
++void
++Ipv4L3Protocol::Lab1ResumeEgress(Ptr<Ipv4Route> route, Ptr<Packet> packet, const Ipv4Header& ipHeader)
+ {
+     NS_LOG_FUNCTION(this << route << packet << &ipHeader);
+     if (!route)
+diff --git a/src/internet/model/ipv4-l3-protocol.h b/src/internet/model/ipv4-l3-protocol.h
+index 9f5a5ba..a73310c 100644
+--- a/src/internet/model/ipv4-l3-protocol.h
++++ b/src/internet/model/ipv4-l3-protocol.h
+@@ -278,7 +278,13 @@ class Ipv4L3Protocol : public Ipv4
+      */
+     void NotifyNewAggregate() override;
+ 
++  public:
++    // Optional experiment hook; null preserves the original output path.
++    void SetLab1EgressFilter(Callback<bool, Ptr<Ipv4Route>, Ptr<Packet>, Ipv4Header> filter) { m_lab1EgressFilter=filter; }
++    void Lab1ResumeEgress(Ptr<Ipv4Route> route, Ptr<Packet> packet, const Ipv4Header& ipHeader);
++
+   private:
++    Callback<bool, Ptr<Ipv4Route>, Ptr<Packet>, Ipv4Header> m_lab1EgressFilter;
+     /**
+      * @brief Ipv4L3ProtocolTestCase test case.
+      * @relates Ipv4L3ProtocolTestCase
+diff --git a/src/internet/model/tcp-cubic.cc b/src/internet/model/tcp-cubic.cc
+index 67c896a..5f06b4c 100644
+--- a/src/internet/model/tcp-cubic.cc
++++ b/src/internet/model/tcp-cubic.cc
+@@ -162,6 +162,13 @@ TcpCubic::TcpCubic(const TcpCubic& sock)
+     NS_LOG_FUNCTION(this);
+ }
+ 
++std::function<void()>
++TcpCubic::SaveUndoStateForExperiment()
++{
++    auto saved = std::make_tuple(m_cWndCnt, m_lastMaxCwnd, m_bicOriginPoint, m_bicK, m_delayMin, m_epochStart, m_found, m_roundStart, m_endSeq, m_lastAck, m_currRtt, m_sampleCnt, m_ackCnt, m_tcpCwnd);
++    return [this, saved]() { std::tie(m_cWndCnt, m_lastMaxCwnd, m_bicOriginPoint, m_bicK, m_delayMin, m_epochStart, m_found, m_roundStart, m_endSeq, m_lastAck, m_currRtt, m_sampleCnt, m_ackCnt, m_tcpCwnd) = saved; };
++}
++
+ std::string
+ TcpCubic::GetName() const
+ {
+diff --git a/src/internet/model/tcp-cubic.h b/src/internet/model/tcp-cubic.h
+index c6a1d13..2fb2c36 100644
+--- a/src/internet/model/tcp-cubic.h
++++ b/src/internet/model/tcp-cubic.h
+@@ -1,3 +1,5 @@
++#include <functional>
++#include <tuple>
+ /*
+  * Copyright (c) 2014 Natale Patriciello <natale.patriciello@gmail.com>
+  *
+@@ -90,6 +92,7 @@ class TcpCubic : public TcpCongestionOps
+                             const TcpSocketState::TcpCongState_t newState) override;
+ 
+     Ptr<TcpCongestionOps> Fork() override;
++    std::function<void()> SaveUndoStateForExperiment();
+     void Init(Ptr<TcpSocketState> tcb) override;
+ 
+   private:
+diff --git a/src/internet/model/tcp-socket-base.cc b/src/internet/model/tcp-socket-base.cc
+index 37f7317..fd3a23d 100644
+--- a/src/internet/model/tcp-socket-base.cc
++++ b/src/internet/model/tcp-socket-base.cc
+@@ -1,3 +1,7 @@
++#include "ns3/tcp-cubic.h"
++#include <cstdlib>
++#include <iostream>
++#include <string>
+ /*
+  * Copyright (c) 2007 Georgia Tech Research Corporation
+  * Copyright (c) 2010 Adrian Sai-wah Tam
+@@ -1714,6 +1718,7 @@ void
+ TcpSocketBase::EnterRecovery(uint32_t currentDelivered)
+ {
+     NS_LOG_FUNCTION(this);
++    BeginTimestampUndo();
+     NS_ASSERT(m_tcb->m_congState != TcpSocketState::CA_RECOVERY);
+ 
+     NS_LOG_DEBUG(TcpSocketState::TcpCongStateName[m_tcb->m_congState] << " -> CA_RECOVERY");
+@@ -1907,6 +1912,7 @@ TcpSocketBase::ReceivedAck(Ptr<Packet> packet, const TcpHeader& tcpHeader)
+     // scoreboard MUST be updated via the Update () routine (done in ReadOptions)
+     uint32_t bytesSacked = 0;
+     uint64_t previousDelivered = m_rateOps->GetConnectionRate().m_delivered;
++    ObserveTimestampUndoAck(tcpHeader);
+     ReadOptions(tcpHeader, &bytesSacked);
+ 
+     SequenceNumber32 ackNumber = tcpHeader.GetAckNumber();
+@@ -2326,6 +2332,7 @@ TcpSocketBase::ProcessAck(const SequenceNumber32& ackNumber,
+             }
+         }
+     }
++    if (exitedFastRecovery) FinishTimestampUndo();
+     // Update the pacing rate, since m_congestionControl->IncreaseWindow() or
+     // m_congestionControl->PktsAcked () may change m_tcb->m_cWnd
+     // Make sure that control reaches the end of this function and there is no
+@@ -3336,6 +3343,13 @@ TcpSocketBase::SendDataPacket(SequenceNumber32 seq, uint32_t maxSize, bool withA
+     }
+     header.SetWindowSize(AdvertisedWindowSize());
+     AddOptions(header);
++    if (m_labUndoActive && isRetransmission) {
++        if (!header.HasOption(TcpOption::TS)) m_labUndoBlocked = true;
++        else {
++            auto ts = DynamicCast<const TcpOptionTS>(header.GetOption(TcpOption::TS));
++            m_labUndoTx.push_back({seq + SequenceNumber32(sz), ts->GetTimestamp(), false, false});
++        }
++    }
+ 
+     if (m_retxEvent.IsExpired())
+     {
+@@ -3955,6 +3969,20 @@ TcpSocketBase::NewAck(const SequenceNumber32& ack, bool resetRTO)
+ void
+ TcpSocketBase::ReTxTimeout()
+ {
++    if (m_labUndoActive) {
++        m_labUndoBlocked=true;m_labUndoActive=false;m_labUndoRestoreCubic=nullptr;
++        std::cout << "LAB1_UNDO_REJECT reason=RTO time_ns=" << Simulator::Now().GetNanoSeconds() << std::endl;
++    }
++    // LAB1_EARLY_RTO_ENTRY_V1
++    // Entry marker only: correlate with CongState/cwnd and packet traces.
++    // This does not assert that every entry triggers a data retransmission.
++    const char* lab1Early = std::getenv("LAB1_EARLY_RTO");
++    if (lab1Early && std::string(lab1Early) == "1")
++    {
++        std::cout << "LAB1_RTO_ENTRY time_ns=" << Simulator::Now().GetNanoSeconds()
++                  << " socket=" << this << std::endl;
++    }
++
+     NS_LOG_FUNCTION(this);
+     NS_LOG_LOGIC(this << " ReTxTimeout Expired at time " << Simulator::Now().GetSeconds());
+     // If erroneous timeout in closed/timed-wait state, just return
+@@ -4902,6 +4930,91 @@ TcpSocketBase::UpdatePacingRate()
+     }
+ }
+ 
++void
++TcpSocketBase::ArmTimestampUndo()
++{
++    if (!m_tcb->m_srtt.Get().IsStrictlyPositive()) return;
++    m_labUndoUntil = Simulator::Now() + 2 * m_tcb->m_srtt.Get();
++    m_labUndoUsed = false;
++    std::cout << "HYBRID_UNDO_WINDOW until_ns=" << m_labUndoUntil.GetNanoSeconds() << std::endl;
++    std::cout << "LAB1_UNDO_ARM time_ns=" << Simulator::Now().GetNanoSeconds() << std::endl;
++}
++
++void
++TcpSocketBase::BeginTimestampUndo()
++{
++    if (m_labUndoUntil.IsZero()) return;
++    if (m_labUndoUsed || Simulator::Now() >= m_labUndoUntil || !m_timestampEnabled) {
++        std::cout << "HYBRID_UNDO_SKIP time_ns=" << Simulator::Now().GetNanoSeconds()
++                  << " reason=" << (m_labUndoUsed?"used":(!m_timestampEnabled?"no_timestamp":"expired")) << std::endl;
++        return;
++    }
++    auto cubic = DynamicCast<TcpCubic>(m_congestionControl);
++    if (!cubic) return;
++    m_labUndoUsed = true;
++    m_labUndoActive = true;
++    m_labUndoBlocked = false;
++    m_labUndoCwnd = m_tcb->m_cWnd.Get();
++    m_labUndoSsThresh = m_tcb->m_ssThresh.Get();
++    m_labUndoRestoreCubic = cubic->SaveUndoStateForExperiment();
++    m_labUndoTx.clear();
++    std::cout << "LAB1_UNDO_BEGIN time_ns=" << Simulator::Now().GetNanoSeconds()
++              << " saved_cwnd=" << m_labUndoCwnd << std::endl;
++}
++
++void
++TcpSocketBase::ObserveTimestampUndoAck(const TcpHeader& header)
++{
++    if (!m_labUndoActive) return;
++    if (header.GetFlags() & TcpHeader::ECE) m_labUndoBlocked = true;
++    if (header.GetAckNumber() <= m_txBuffer->HeadSequence()) return;
++    bool hasTs = header.HasOption(TcpOption::TS);
++    uint32_t echo = hasTs ? DynamicCast<const TcpOptionTS>(header.GetOption(TcpOption::TS))->GetEcho() : 0;
++    for (auto& tx : m_labUndoTx) {
++        if (!tx.checked && header.GetAckNumber() >= tx.end) {
++            tx.checked = true;
++            tx.originalEvidence = hasTs && int32_t(echo - tx.timestamp) < 0;
++            std::cout << "HYBRID_UNDO_EVIDENCE time_ns=" << Simulator::Now().GetNanoSeconds()
++                      << " end=" << tx.end.GetValue() << " retx_ts=" << tx.timestamp
++                      << " ack=" << header.GetAckNumber().GetValue() << " echo=" << echo
++                      << " proven=" << tx.originalEvidence << std::endl;
++        }
++    }
++}
++
++void
++TcpSocketBase::FinishTimestampUndo()
++{
++    if (!m_labUndoActive) return;
++    m_labUndoActive = false;
++    uint32_t proven = 0;
++    for (const auto& tx : m_labUndoTx) if (tx.checked && tx.originalEvidence) ++proven;
++    if (m_labUndoBlocked || m_labUndoTx.empty() || proven != m_labUndoTx.size()) {
++        std::cout << "LAB1_UNDO_REJECT time_ns=" << Simulator::Now().GetNanoSeconds()
++                  << " proven=" << proven << " retransmissions=" << m_labUndoTx.size() << std::endl;
++        m_labUndoRestoreCubic = nullptr;
++        return;
++    }
++    uint32_t flight = BytesInFlight();
++    uint32_t before = m_tcb->m_cWnd.Get();
++    uint32_t safe = std::max(before, std::min(m_labUndoCwnd, flight + 10 * m_tcb->m_segmentSize));
++    m_labUndoRestoreCubic();
++    m_labUndoRestoreCubic = nullptr;
++    const bool full=std::getenv("HYBRID_FULL_UNDO") && std::string(std::getenv("HYBRID_FULL_UNDO"))=="1";
++    if(full) {
++        m_tcb->m_cWnd = safe;m_tcb->m_cWndInfl = safe;
++        m_tcb->m_ssThresh = std::max(m_labUndoCwnd, m_labUndoSsThresh);
++    }
++    std::cout << "HYBRID_UNDO_COMPONENT time_ns=" << Simulator::Now().GetNanoSeconds()
++              << " full=" << full << " cwnd_before=" << before << " cwnd_after=" << m_tcb->m_cWnd.Get()
++              << " cap_bps=" << m_tcb->m_maxPacingRate.GetBitRate() << std::endl;
++    std::cout << "LAB1_UNDO_APPLY time_ns=" << Simulator::Now().GetNanoSeconds()
++              << " proven=" << proven << " retransmissions=" << m_labUndoTx.size()
++              << " cwnd_before=" << before << " cwnd_after=" << m_tcb->m_cWnd.Get()
++              << " target=" << m_labUndoCwnd << " flight=" << flight << std::endl;
++}
++
++
+ void
+ TcpSocketBase::SetPacingStatus(bool pacing)
+ {
+diff --git a/src/internet/model/tcp-socket-base.h b/src/internet/model/tcp-socket-base.h
+index d914214..1882428 100644
+--- a/src/internet/model/tcp-socket-base.h
++++ b/src/internet/model/tcp-socket-base.h
+@@ -1,3 +1,5 @@
++#include <functional>
++#include <vector>
+ /*
+  * Copyright (c) 2007 Georgia Tech Research Corporation
+  * Copyright (c) 2010 Adrian Sai-wah Tam
+@@ -607,8 +609,33 @@ class TcpSocketBase : public TcpSocket
+      * @brief Enable or disable pacing
+      * @param pacing Boolean to enable or disable pacing
+      */
++    void ArmTimestampUndo();
++    void BeginTimestampUndo();
++    void ObserveTimestampUndoAck(const TcpHeader& header);
++    void FinishTimestampUndo();
++    Time m_labUndoUntil{Seconds(0)};
++    bool m_labUndoUsed{false};
++    bool m_labUndoActive{false};
++    bool m_labUndoBlocked{false};
++    uint32_t m_labUndoCwnd{0};
++    uint32_t m_labUndoSsThresh{0};
++    std::function<void()> m_labUndoRestoreCubic;
++    struct LabUndoTx {
++        SequenceNumber32 end;
++        uint32_t timestamp;
++        bool checked{false};
++        bool originalEvidence{false};
++    };
++    std::vector<LabUndoTx> m_labUndoTx;
++
++
+     void SetPacingStatus(bool pacing);
+ 
++    // Experiment-only control of the existing pacing cap; loss detection is unchanged.
++    void Lab1SetPacingCap(DataRate rate) { m_tcb->m_maxPacingRate=rate; UpdatePacingRate(); }
++    bool Lab1PacingWindowFull() const { return m_tcb->m_bytesInFlight.Get()+m_tcb->m_segmentSize >= m_tcb->m_cWnd.Get(); }
++
++
+     /**
+      * @brief Enable or disable pacing of the initial window
+      * @param paceWindow Boolean to enable or disable pacing of the initial window

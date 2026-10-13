@@ -1,0 +1,57 @@
+{
+  "build": {
+    "binary_sha256": "1b928b5f7ba7c91ca931f301effba57584b6caa27c6a3637b255be8e42fe6e65",
+    "internet_sha256": "a9b62cf31d518de3a2921e3c8f215c0ed7d7086a43d2a696bf46cb50bc2171a7",
+    "sources": {
+      "scratch/main_satnet/handover.h": "fd02312de4f170e058e81824ef7ad7992f0de8e21baaa8020a8fdc8ebc54f761",
+      "scratch/main_satnet/lab1_packet_hops.h": "fe9876bb3492d66e5d857e36523c818c90faf6cc6a584a0e17be9411588873eb",
+      "scratch/main_satnet/main_satnet.cc": "67025e4bf727ed0736ec1983374b9cc6a4105c1d2477a2da700b709b1f936e14",
+      "src/internet/model/ipv4-l3-protocol.cc": "1d06865a51c2b06979a5409cf482231a6e2a82ecaa566319270c0fb3d4d8390a",
+      "src/internet/model/ipv4-l3-protocol.h": "664e88786b7e6d4178e190b4d068bc5d17031638ab196c5ebe7a9c405dad156b",
+      "src/internet/model/tcp-socket-base.cc": "001b4f50ecd530ee625261e87793f6aa264c93fa3c8748f4f46f1087493d54b3",
+      "src/internet/model/tcp-socket-base.h": "1923a0576e0e4e380c87953b92bd9073d9a7619ed94bf3e4a6464af9d5f8bb0b",
+      "src/internet/model/tcp-cubic.cc": "64a38ba40164dee9d7f5eca730767b2b95136ff48739bb0ea5fe34e48aeda734",
+      "src/internet/model/tcp-cubic.h": "d566a6160c95d82256377f13d31ce23054380567b20b9ce21626e5abf5395766"
+    }
+  },
+  "arms": [
+    "v5",
+    "undo",
+    "auto_watch_undo",
+    "guard_watch_undo",
+    "queue_guard_undo"
+  ],
+  "city": "manila",
+  "ground_stations": [
+    "Seoul,37.56826,126.97783",
+    "Manila,14.60,120.98"
+  ],
+  "selection": "First change >=20s, >=1s after previous and >=12s before next, using topology only; generate after pilot. Freeze candidate before performance.",
+  "parent_plan_sha256": "382f548f23d55c3df571639cd1d3427b12cd774b7454da6aa737425039650902",
+  "conditions": {
+    "link_mbps": 100,
+    "queue_packets": 100,
+    "flows": 1,
+    "seed": 123456789,
+    "initial_pacing": false
+  },
+  "criteria": "Candidate event10 >=99% of best v5/undo and previous guard; no whole loss/RTO increase vs v5 or previous guard; event10 retx zero; event2 LastRTT p95 <=110% of v5 and auto_watch_undo.",
+  "geometry": "Original generator functions and 200s/100ms model; Hypatia disjoint interval workers run in forked processes instead of threads. Original files are unchanged.",
+  "generator_sha256": "62cbfccad15185e0f7c1022b07f5021a940b9c9645d0e62aa453e0285cebdfee",
+  "events": {
+    "manila": "d5001b8a6503b55bf6cb591c962ae40fe9d267d29f733f01b0b96092e1fb8c94"
+  },
+  "event_s": 80.9,
+  "candidates_s": [
+    80.9,
+    182.8
+  ],
+  "topology_changes_s": [
+    68.5,
+    77.1,
+    80.9,
+    182.8
+  ],
+  "selection_plan_sha256": "9109d5b47f885e269303159451d4aa04d12619594b9e5dc0834205f8cee05900",
+  "state_sha256": "39b98a22dbb3c61db99dbb039b0c454897c53d36e0eb588be3ca5ae4598bdaef"
+}

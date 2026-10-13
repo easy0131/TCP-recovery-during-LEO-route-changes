@@ -1,0 +1,612 @@
+{
+  "city": "losangeles",
+  "native_state": "/tmp/lab1-seoul-losangeles-v5/state",
+  "nominal_ns": 49400000000,
+  "nominal_s": 49.4,
+  "stop_s": 59.4,
+  "previous_change_s": 10.3,
+  "next_change_s": 160.9,
+  "first_check_ns": 49316000000,
+  "safe_end_ns": 49545000000,
+  "first_old_invalid_ns": null,
+  "new_valid_from_ns": 49316000000,
+  "geometry_feasible": true,
+  "grid_ns": 1000000,
+  "old_rtt_ns": 73363216,
+  "new_rtt_ns": 72243788,
+  "full_routing_sha256": "70f8ec8a7f62ef721740587e54a8af627f25293e69b013bcbeccb882dbeef4a9",
+  "state_horizon_s": 200,
+  "active": [
+    {
+      "node": 839,
+      "destination": 1584,
+      "value": [
+        1584,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 839,
+      "destination": 1585,
+      "value": [
+        840,
+        2,
+        1
+      ]
+    },
+    {
+      "node": 840,
+      "destination": 1584,
+      "value": [
+        839,
+        1,
+        2
+      ]
+    },
+    {
+      "node": 840,
+      "destination": 1585,
+      "value": [
+        841,
+        2,
+        1
+      ]
+    },
+    {
+      "node": 841,
+      "destination": 1584,
+      "value": [
+        840,
+        1,
+        2
+      ]
+    },
+    {
+      "node": 841,
+      "destination": 1585,
+      "value": [
+        863,
+        3,
+        0
+      ]
+    },
+    {
+      "node": 863,
+      "destination": 1584,
+      "value": [
+        841,
+        0,
+        3
+      ]
+    },
+    {
+      "node": 863,
+      "destination": 1585,
+      "value": [
+        864,
+        2,
+        1
+      ]
+    },
+    {
+      "node": 864,
+      "destination": 1584,
+      "value": [
+        863,
+        1,
+        2
+      ]
+    },
+    {
+      "node": 864,
+      "destination": 1585,
+      "value": [
+        865,
+        2,
+        1
+      ]
+    },
+    {
+      "node": 865,
+      "destination": 1584,
+      "value": [
+        864,
+        1,
+        2
+      ]
+    },
+    {
+      "node": 865,
+      "destination": 1585,
+      "value": [
+        1585,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 1584,
+      "destination": 1585,
+      "value": [
+        839,
+        0,
+        4
+      ]
+    },
+    {
+      "node": 1585,
+      "destination": 1584,
+      "value": [
+        865,
+        0,
+        4
+      ]
+    }
+  ],
+  "retired": [
+    {
+      "node": 839,
+      "destination": 1584,
+      "value": [
+        1584,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 839,
+      "destination": 1585,
+      "value": [
+        840,
+        2,
+        1
+      ]
+    },
+    {
+      "node": 840,
+      "destination": 1584,
+      "value": [
+        839,
+        1,
+        2
+      ]
+    },
+    {
+      "node": 840,
+      "destination": 1585,
+      "value": [
+        841,
+        2,
+        1
+      ]
+    },
+    {
+      "node": 841,
+      "destination": 1584,
+      "value": [
+        840,
+        1,
+        2
+      ]
+    },
+    {
+      "node": 841,
+      "destination": 1585,
+      "value": [
+        863,
+        3,
+        0
+      ]
+    },
+    {
+      "node": 842,
+      "destination": 1584,
+      "value": [
+        841,
+        1,
+        2
+      ]
+    },
+    {
+      "node": 842,
+      "destination": 1585,
+      "value": [
+        864,
+        3,
+        0
+      ]
+    },
+    {
+      "node": 843,
+      "destination": 1584,
+      "value": [
+        842,
+        1,
+        2
+      ]
+    },
+    {
+      "node": 843,
+      "destination": 1585,
+      "value": [
+        865,
+        3,
+        0
+      ]
+    },
+    {
+      "node": 844,
+      "destination": 1584,
+      "value": [
+        843,
+        1,
+        2
+      ]
+    },
+    {
+      "node": 844,
+      "destination": 1585,
+      "value": [
+        1585,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 863,
+      "destination": 1584,
+      "value": [
+        841,
+        0,
+        3
+      ]
+    },
+    {
+      "node": 863,
+      "destination": 1585,
+      "value": [
+        864,
+        2,
+        1
+      ]
+    },
+    {
+      "node": 864,
+      "destination": 1584,
+      "value": [
+        863,
+        1,
+        2
+      ]
+    },
+    {
+      "node": 864,
+      "destination": 1585,
+      "value": [
+        865,
+        2,
+        1
+      ]
+    },
+    {
+      "node": 865,
+      "destination": 1584,
+      "value": [
+        864,
+        1,
+        2
+      ]
+    },
+    {
+      "node": 865,
+      "destination": 1585,
+      "value": [
+        1585,
+        4,
+        0
+      ]
+    },
+    {
+      "node": 1584,
+      "destination": 1585,
+      "value": [
+        839,
+        0,
+        4
+      ]
+    },
+    {
+      "node": 1585,
+      "destination": 1584,
+      "value": [
+        865,
+        0,
+        4
+      ]
+    }
+  ],
+  "directions": [
+    {
+      "node": 841,
+      "destination": 1585,
+      "old_path": [
+        1584,
+        839,
+        840,
+        841,
+        842,
+        843,
+        844,
+        1585
+      ],
+      "new_path": [
+        1584,
+        839,
+        840,
+        841,
+        863,
+        864,
+        865,
+        1585
+      ],
+      "old_tail": [
+        841,
+        842,
+        843,
+        844,
+        1585
+      ],
+      "new_tail": [
+        841,
+        863,
+        864,
+        865,
+        1585
+      ],
+      "old_queues": [
+        [
+          1584,
+          1
+        ],
+        [
+          839,
+          3
+        ],
+        [
+          840,
+          3
+        ],
+        [
+          841,
+          3
+        ],
+        [
+          842,
+          3
+        ],
+        [
+          843,
+          3
+        ],
+        [
+          844,
+          5
+        ]
+      ],
+      "tail_queues": [
+        [
+          841,
+          3
+        ],
+        [
+          842,
+          3
+        ],
+        [
+          843,
+          3
+        ],
+        [
+          844,
+          5
+        ]
+      ],
+      "new_queues": [
+        [
+          1584,
+          1
+        ],
+        [
+          839,
+          3
+        ],
+        [
+          840,
+          3
+        ],
+        [
+          841,
+          4
+        ],
+        [
+          863,
+          3
+        ],
+        [
+          864,
+          3
+        ],
+        [
+          865,
+          5
+        ]
+      ],
+      "new_out": 4,
+      "keep": [
+        {
+          "node": 842,
+          "destination": 1585,
+          "value": [
+            843,
+            2,
+            1
+          ]
+        },
+        {
+          "node": 843,
+          "destination": 1585,
+          "value": [
+            844,
+            2,
+            1
+          ]
+        }
+      ],
+      "old_prop_ns": 36681608,
+      "tail_prop_ns": 21758091,
+      "new_lower_ns": 21196668,
+      "new_prop_ns": 36121894
+    },
+    {
+      "node": 1585,
+      "destination": 1584,
+      "old_path": [
+        1585,
+        844,
+        843,
+        842,
+        841,
+        840,
+        839,
+        1584
+      ],
+      "new_path": [
+        1585,
+        865,
+        864,
+        863,
+        841,
+        840,
+        839,
+        1584
+      ],
+      "old_tail": [
+        1585,
+        844,
+        843,
+        842,
+        841,
+        840,
+        839,
+        1584
+      ],
+      "new_tail": [
+        1585,
+        865,
+        864,
+        863,
+        841,
+        840,
+        839,
+        1584
+      ],
+      "old_queues": [
+        [
+          1585,
+          1
+        ],
+        [
+          844,
+          2
+        ],
+        [
+          843,
+          2
+        ],
+        [
+          842,
+          2
+        ],
+        [
+          841,
+          2
+        ],
+        [
+          840,
+          2
+        ],
+        [
+          839,
+          5
+        ]
+      ],
+      "tail_queues": [
+        [
+          1585,
+          1
+        ],
+        [
+          844,
+          2
+        ],
+        [
+          843,
+          2
+        ],
+        [
+          842,
+          2
+        ],
+        [
+          841,
+          2
+        ],
+        [
+          840,
+          2
+        ],
+        [
+          839,
+          5
+        ]
+      ],
+      "new_queues": [
+        [
+          1585,
+          1
+        ],
+        [
+          865,
+          2
+        ],
+        [
+          864,
+          2
+        ],
+        [
+          863,
+          1
+        ],
+        [
+          841,
+          2
+        ],
+        [
+          840,
+          2
+        ],
+        [
+          839,
+          5
+        ]
+      ],
+      "new_out": 1,
+      "keep": [],
+      "old_prop_ns": 36681608,
+      "tail_prop_ns": 36681608,
+      "new_lower_ns": 36120798,
+      "new_prop_ns": 36121894
+    }
+  ]
+}

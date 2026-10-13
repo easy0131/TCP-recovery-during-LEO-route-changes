@@ -1,0 +1,60 @@
+{
+  "build": {
+    "binary_sha256": "1b928b5f7ba7c91ca931f301effba57584b6caa27c6a3637b255be8e42fe6e65",
+    "internet_sha256": "a9b62cf31d518de3a2921e3c8f215c0ed7d7086a43d2a696bf46cb50bc2171a7",
+    "sources": {
+      "scratch/main_satnet/handover.h": "fd02312de4f170e058e81824ef7ad7992f0de8e21baaa8020a8fdc8ebc54f761",
+      "scratch/main_satnet/lab1_packet_hops.h": "fe9876bb3492d66e5d857e36523c818c90faf6cc6a584a0e17be9411588873eb",
+      "scratch/main_satnet/main_satnet.cc": "67025e4bf727ed0736ec1983374b9cc6a4105c1d2477a2da700b709b1f936e14",
+      "src/internet/model/ipv4-l3-protocol.cc": "1d06865a51c2b06979a5409cf482231a6e2a82ecaa566319270c0fb3d4d8390a",
+      "src/internet/model/ipv4-l3-protocol.h": "664e88786b7e6d4178e190b4d068bc5d17031638ab196c5ebe7a9c405dad156b",
+      "src/internet/model/tcp-socket-base.cc": "001b4f50ecd530ee625261e87793f6aa264c93fa3c8748f4f46f1087493d54b3",
+      "src/internet/model/tcp-socket-base.h": "1923a0576e0e4e380c87953b92bd9073d9a7619ed94bf3e4a6464af9d5f8bb0b",
+      "src/internet/model/tcp-cubic.cc": "64a38ba40164dee9d7f5eca730767b2b95136ff48739bb0ea5fe34e48aeda734",
+      "src/internet/model/tcp-cubic.h": "d566a6160c95d82256377f13d31ce23054380567b20b9ce21626e5abf5395766"
+    }
+  },
+  "cities": [
+    "tokyo",
+    "london",
+    "newyork",
+    "sydney",
+    "singapore",
+    "losangeles"
+  ],
+  "arms": [
+    "guard_watch_undo",
+    "queue_guard_undo"
+  ],
+  "events": {
+    "tokyo": "f97b49e3d90fead93a1daf26af7cafec90a23136e7ee5dc17433c8b152b0be94",
+    "london": "64eb67aef28aeea395b329f8d949e73b8e83034012b5d2f6df5858bc6e5876e2",
+    "newyork": "9ed5fa52f54fe5314cd49bf72234876cb69923766ebd93a81c82aac3fe3073f1",
+    "sydney": "2d12d3fcc0efbd1a4767f69b4172b12a14d633c1f23f3aea33489fcd27254821",
+    "singapore": "124a7d5b817cdf9a1ab9003d55cf623f7e985114e5dde3454efed23a00102c9a",
+    "losangeles": "d9b10d96ac1fc73e00677871ac4e79daa9d9e8ddb56b2164cf533fc566626572"
+  },
+  "pilot": [
+    "tokyo",
+    "london",
+    "newyork"
+  ],
+  "regression": [
+    "sydney",
+    "singapore",
+    "losangeles"
+  ],
+  "rule": "Keep the original tapered order gate and all existing policies. Add max(0, serialized data-gate backlog minus 10% of measured new path RTT) to pacing feedback queue delay. No city-specific thresholds; unchanged TCP detector and CUBIC undo evidence checks.",
+  "criteria": "Per route: >=99% of old guarded hybrid event10 throughput; no additional whole-run TcDrop plus gate drops or RTO; event10 retransmissions zero; event2 LastRTT p95 <=110% of old auto_watch_undo and <=110% of v5. Also report every reference and failure.",
+  "scope": "Six known routes for development/regression. A fresh route is required before claiming new-route validation. Single saturated flow, 100Mbps, q100, seed123456789. FCT unmeasured.",
+  "next_unseen_route": {
+    "city": "manila",
+    "stations": [
+      "Seoul,37.56826,126.97783",
+      "Manila,14.60,120.98"
+    ],
+    "selection": "First change >=20s, >=1s after previous and >=12s before next, using topology only; generate after pilot. Freeze candidate before performance."
+  },
+  "parent_plan_sha256": "049a7b7d9753e7a0aaef9245bca39923ab79b2e21441573380b0fc2c9fc04be2",
+  "development_note": "The preceding absolute-deadline candidate failed London with 19 gate drops. This separate candidate returns to the original FIFO/taper before adding visibility of order-buffer backlog."
+}

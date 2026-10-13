@@ -1,0 +1,20 @@
+{
+  "previous_patch_sha256": "a324ae5da7c7eae8cff70be4ac133ae5cd673b2afa5e453e239ab41e87bf9bab",
+  "course_export": {
+    "tool": "/home/ubuntu/lab/scripts/make_patch.sh",
+    "sha256": "a501df958e100482df2ab7c396afa4e104d792438aa67c5d565c30fb8d8d0628",
+    "files": [
+      "scratch/main_satnet/handover.h",
+      "scratch/main_satnet/lab1_packet_hops.h",
+      "scratch/main_satnet/main_satnet.cc",
+      "src/internet/model/ipv4-l3-protocol.cc",
+      "src/internet/model/ipv4-l3-protocol.h",
+      "src/internet/model/tcp-cubic.cc",
+      "src/internet/model/tcp-cubic.h",
+      "src/internet/model/tcp-socket-base.cc",
+      "src/internet/model/tcp-socket-base.h"
+    ],
+    "validation": "reverse apply check against exact final sources; forward clean-volume test remains required"
+  },
+  "note": "This receipt does not certify simulations or a second clean-volume build."
+}

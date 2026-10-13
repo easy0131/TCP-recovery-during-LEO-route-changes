@@ -1,0 +1,9 @@
+[project]
+name = "cs30401-lab1-analysis"
+version = "0.1.0"
+description = "Analysis and plotting dependencies for the CS30401 Lab 1 submission"
+requires-python = ">=3.12"
+dependencies = ["matplotlib>=3.8,<4"]
+
+[tool.uv]
+package = false

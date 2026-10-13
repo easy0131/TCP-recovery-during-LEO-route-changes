@@ -1,0 +1,35 @@
+{
+  "case": "london:queue_guard_undo",
+  "city": "london",
+  "arm": "queue_guard_undo",
+  "build": {
+    "binary_sha256": "1b928b5f7ba7c91ca931f301effba57584b6caa27c6a3637b255be8e42fe6e65",
+    "internet_sha256": "a9b62cf31d518de3a2921e3c8f215c0ed7d7086a43d2a696bf46cb50bc2171a7",
+    "sources": {
+      "scratch/main_satnet/handover.h": "fd02312de4f170e058e81824ef7ad7992f0de8e21baaa8020a8fdc8ebc54f761",
+      "scratch/main_satnet/lab1_packet_hops.h": "fe9876bb3492d66e5d857e36523c818c90faf6cc6a584a0e17be9411588873eb",
+      "scratch/main_satnet/main_satnet.cc": "67025e4bf727ed0736ec1983374b9cc6a4105c1d2477a2da700b709b1f936e14",
+      "src/internet/model/ipv4-l3-protocol.cc": "1d06865a51c2b06979a5409cf482231a6e2a82ecaa566319270c0fb3d4d8390a",
+      "src/internet/model/ipv4-l3-protocol.h": "664e88786b7e6d4178e190b4d068bc5d17031638ab196c5ebe7a9c405dad156b",
+      "src/internet/model/tcp-socket-base.cc": "001b4f50ecd530ee625261e87793f6aa264c93fa3c8748f4f46f1087493d54b3",
+      "src/internet/model/tcp-socket-base.h": "1923a0576e0e4e380c87953b92bd9073d9a7619ed94bf3e4a6464af9d5f8bb0b",
+      "src/internet/model/tcp-cubic.cc": "64a38ba40164dee9d7f5eca730767b2b95136ff48739bb0ea5fe34e48aeda734",
+      "src/internet/model/tcp-cubic.h": "d566a6160c95d82256377f13d31ce23054380567b20b9ce21626e5abf5395766"
+    }
+  },
+  "event_sha256": "64eb67aef28aeea395b329f8d949e73b8e83034012b5d2f6df5858bc6e5876e2",
+  "config_sha256": "7d23cee02c27971db71d5483737da462ea35bb7f13dcb774a77e1b4b1603d1d3",
+  "schedule_sha256": "e6cde3aa7716856e46d24c3833354df90407313ece13a5ffbd1b789fa4fea23c",
+  "environment": {
+    "HYBRID_ARM": "queue_guard_undo",
+    "HYBRID_FULL_UNDO": "0",
+    "ADAPT_MODE": "adaptive",
+    "ADAPT_EVENT_FILE": "/work/v5_undo_queueaware_20261011/london_event.txt",
+    "ADAPT_NOMINAL_NS": "26200000000",
+    "LAB1_DIAG": "1",
+    "LAB1_HOPS": "1",
+    "LAB1_EARLY_RTO": "1"
+  },
+  "exit_code": 0,
+  "wall_seconds": 69.22280655100008
+}
