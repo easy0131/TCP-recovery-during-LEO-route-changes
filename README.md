@@ -105,3 +105,23 @@ This project builds on the course-provided ns-3.48/Hypatia environment and the `
 - `v5_undo_hybrid/` and the other method-specific directories: fixed configurations, method evidence, and shared analysis for the compared controllers.
 - `diagnose.py`, `team_share_recheck/`: packet/RTO diagnosis. The pipeline imports `rto_proof` and its helpers from the historical script; it does not execute that script's standalone analysis entry point. A Windows archive path in its historical case-analysis branch is not reached by the pipeline's `rto_proof` call.
 - `render_results.py`, `queue_runs.py`, `analyze_queue_delay.py`: report metrics, plots, and queue comparisons. Use the top-level workflow rather than running historical standalone scripts directly.
+
+## Team Contributions
+
+### Junhui Kim
+- Analyzed the causes of startup timeouts and cwnd reductions before and after route changes.
+- Added TcDrop tracing to distinguish actual packet loss from unnecessary retransmissions.
+- Compared throughput and SRTT through additional experiments across queue sizes.
+- Consolidated team results into the final report and README, and checked the consistency of reported values and evaluation criteria.
+- Contributed to assembling and validating the reproduction package.
+
+### Woojin Lim
+- Implemented pacing caps and time-limited loss-detection deferral, and evaluated their effects on throughput, packet loss, and RTOs, along with their limitations.
+- Implemented timestamp-based recovery undo and identified the importance of restoring CUBIC’s internal state through ablation experiments.
+- Compared v5 and recovery undo individually and in combination, and analyzed their benefits and side effects.
+- Prepared reproduction materials and verified the reproducibility of all 46 experimental cases.
+
+### Jio Lee
+- Distinguished packet reordering from actual loss during route changes and quantified the effects of unnecessary retransmissions and cwnd reductions on performance.
+- Compared route-switching timing and old-path retention strategies, and implemented v5 by combining packet-order protection with pacing.
+- Improved the combined v5 and recovery undo scheme through conditional pacing, continuous queue monitoring, and packet-order protection.
